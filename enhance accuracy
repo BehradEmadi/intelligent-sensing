@@ -194,7 +194,7 @@ def find_best_architecture(xtrain, xtest, ytrain, ytest, xval, yval):
 
 def main():
     # File path to the dataset
-    file_path = 'D://paper2source/feedstomodelsfinalMK.csv'
+    file_path = ' file_path.csv'
     
     # Load and prepare the data
     rowdata = load_and_prepare_data(file_path)
