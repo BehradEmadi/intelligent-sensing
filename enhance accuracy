@@ -1,0 +1,251 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import RobustScaler
+from sklearn import metrics
+from sklearn import neural_network as nn
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score, mean_absolute_error
+from scipy.stats import pearsonr
+
+# --- Data Preparation ---
+
+def load_and_prepare_data(file_path):
+    """Load and prepare the dataset by renaming columns and removing unnecessary ones.
+
+    Args:
+        file_path (str): Path to the CSV file.
+
+    Returns:
+        pd.DataFrame: Prepared DataFrame.
+    """
+    data = pd.read_csv(file_path)
+    rowdata = pd.DataFrame(data)
+    
+    # Remove the first column if it's unnecessary
+    rowdata = rowdata.drop(rowdata.columns[[0]], axis=1)
+    
+    # Rename columns for better readability
+    rowdata.rename(columns={'field1': 'Temperature', 'field2': 'humidity',
+                            'field3.1': 'xaxis', 'field4': 'yaxis', 'unyeki': 'result'}, inplace=True)
+    
+    return rowdata
+
+def split_and_scale_data(rowdata):
+    """Split the data into training, testing, and validation sets, and apply scaling.
+
+    Args:
+        rowdata (pd.DataFrame): The prepared DataFrame.
+
+    Returns:
+        tuple: Scaled and split data (xtrain, xtest, xval, ytrain, ytest, yval).
+    """
+    xsplit = rowdata.drop(columns=['result']).copy()
+    ysplit = rowdata['result'].values.ravel()
+    
+    xtrain, xrem, ytrain, yrem = train_test_split(
+        xsplit, ysplit, train_size=0.7, random_state=12)
+    xtest, xval, ytest, yval = train_test_split(
+        xrem, yrem, train_size=0.5, random_state=17)
+    
+    # Apply RobustScaler to handle outliers and scale data
+    scaler = RobustScaler().fit(xtrain)
+    xtrain = scaler.transform(xtrain)
+    xtest = scaler.transform(xtest)
+    xval = scaler.transform(xval)
+    
+    return xtrain, xtest, xval, ytrain, ytest, yval, scaler
+
+# --- Model Training and Evaluation ---
+
+def train_and_evaluate_mlp(xtrain, xtest, ytrain, ytest, xval, yval, hidden_layers, learning_rate, epochs):
+    """Train and evaluate an MLPRegressor model.
+
+    Args:
+        xtrain (np.array): Training data features.
+        xtest (np.array): Testing data features.
+        ytrain (np.array): Training data labels.
+        ytest (np.array): Testing data labels.
+        xval (np.array): Validation data features.
+        yval (np.array): Validation data labels.
+        hidden_layers (tuple): Configuration of hidden layers.
+        learning_rate (float): Learning rate for the model.
+        epochs (int): Number of training epochs.
+
+    Returns:
+        dict: A dictionary containing evaluation metrics.
+    """
+    model = nn.MLPRegressor(max_iter=epochs, random_state=121, hidden_layer_sizes=hidden_layers,
+                            activation='relu', solver='adam', batch_size=1, learning_rate_init=learning_rate)
+    
+    model.fit(xtrain, ytrain)
+    predicttest = model.predict(xtest)
+    
+    # Calculate evaluation metrics
+    testmse = metrics.mean_squared_error(ytest, predicttest)
+    rmse = np.sqrt(testmse)
+    r2 = r2_score(ytest, predicttest)
+    mae = mean_absolute_error(ytest, predicttest)
+    pearson_coeff, _ = pearsonr(ytest, predicttest)
+    
+    return {
+        'test_mse': testmse,
+        'rmse': rmse,
+        'r2_score': r2,
+        'mae': mae,
+        'pearson_coeff': pearson_coeff
+    }, model, predicttest
+
+def plot_results(predicttest, ytest, xresult, title_suffix=''):
+    """Plot the results of the model's predictions against actual values.
+
+    Args:
+        predicttest (np.array): Predicted values from the model.
+        ytest (np.array): Actual values.
+        xresult (np.array): Baseline (e.g., sensor) values.
+        title_suffix (str): Suffix for plot titles to differentiate between plots.
+    """
+    num_data_points = len(ytest)
+    x_counting = range(1, num_data_points + 1)
+    
+    plt.figure(1)
+    plt.plot(x_counting, predicttest, label='I-LARA')
+    plt.plot(x_counting, xresult, label='LARA')
+    plt.plot(x_counting, ytest, label='Commercial inclinometer')
+    plt.xlabel('Number of Data')
+    plt.ylabel('Inclination (°)')
+    plt.title(f'Three Different Outputs {title_suffix}')
+    plt.legend()
+    
+    plt.figure(2)
+    plt.plot(x_counting, predicttest, label='I-LARA')
+    plt.plot(x_counting, ytest, label='Commercial inclinometer')
+    plt.xlabel('Number of Data')
+    plt.ylabel('Inclination (°)')
+    plt.title(f'I-LARA vs Commercial inclinometer {title_suffix}')
+    plt.legend()
+    
+    plt.figure(3)
+    plt.plot(x_counting, xresult, label='LARA')
+    plt.plot(x_counting, ytest, label='Commercial inclinometer')
+    plt.xlabel('Number of Data')
+    plt.ylabel('Inclination (°)')
+    plt.title(f'LARA vs Commercial inclinometer {title_suffix}')
+    plt.legend()
+    
+    plt.show()
+
+def plot_histogram_of_errors(errors, title):
+    """Plot a histogram of the prediction errors with a fitted normal distribution curve.
+
+    Args:
+        errors (np.array): Array of prediction errors.
+        title (str): Title for the plot.
+    """
+    plt.hist(errors, bins=10, density=True, alpha=0.6, color='blue')
+    
+    mu, sigma = np.mean(errors), np.std(errors)
+    x = np.linspace(mu - 4 * sigma, mu + 4 * sigma, 100)
+    pdf = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(x - mu)**2 / (2 * sigma**2))
+    plt.plot(x, pdf, color='red', linewidth=2)
+    
+    plt.xlabel('Errors')
+    plt.ylabel('Probability Density')
+    plt.title(title)
+    plt.show()
+
+def find_best_architecture(xtrain, xtest, ytrain, ytest, xval, yval):
+    """Identify the best architecture for the MLP by testing different hidden layer configurations and epochs.
+
+    Args:
+        xtrain (np.array): Training data features.
+        xtest (np.array): Testing data features.
+        ytrain (np.array): Training data labels.
+        ytest (np.array): Testing data labels.
+        xval (np.array): Validation data features.
+        yval (np.array): Validation data labels.
+
+    Returns:
+        tuple: Best hidden layer configuration, best learning rate, best epochs.
+    """
+    # Define possible hidden layer configurations and learning rates
+    hidden_layer_configurations = [(5, 5), (10, 10), (5, 5, 5), (10, 10, 10)]
+    learning_rates = [0.001, 0.01, 0.1]
+    epochs_list = [100, 200, 300]
+
+    best_config = None
+    best_score = float('inf')
+
+    for hidden_layers in hidden_layer_configurations:
+        for learning_rate in learning_rates:
+            for epochs in epochs_list:
+                metrics_dict, _, _ = train_and_evaluate_mlp(
+                    xtrain, xtest, ytrain, ytest, xval, yval,
+                    hidden_layers, learning_rate, epochs
+                )
+                if metrics_dict['rmse'] < best_score:
+                    best_score = metrics_dict['rmse']
+                    best_config = (hidden_layers, learning_rate, epochs)
+    
+    print(f"Best Architecture: {best_config[0]}, Learning Rate: {best_config[1]}, Epochs: {best_config[2]}")
+    return best_config
+
+# --- Main Script Execution ---
+
+def main():
+    # File path to the dataset
+    file_path = 'D://paper2source/feedstomodelsfinalMK.csv'
+    
+    # Load and prepare the data
+    rowdata = load_and_prepare_data(file_path)
+    
+    # Split and scale the data
+    xtrain, xtest, xval, ytrain, ytest, yval, scaler = split_and_scale_data(rowdata)
+    
+    # Identify the best architecture
+    best_hidden_layers, best_learning_rate, best_epochs = find_best_architecture(xtrain, xtest, ytrain, ytest, xval, yval)
+    
+    # Train and evaluate the model with the best parameters
+    metrics_dict, model, predicttest = train_and_evaluate_mlp(
+        xtrain, xtest, ytrain, ytest, xval, yval,
+        best_hidden_layers, best_learning_rate, best_epochs
+        best_hidden_layers, best_learning_rate, best_epochs
+    )
+
+    # Evaluate the model on validation data
+    predicttest_val = model.predict(xval)
+    
+    val_metrics_dict = {
+        'mse': metrics.mean_squared_error(yval, predicttest_val),
+        'rmse': np.sqrt(metrics.mean_squared_error(yval, predicttest_val)),
+        'r2_score': r2_score(yval, predicttest_val),
+        'mae': mean_absolute_error(yval, predicttest_val),
+        'pearson_coeff': pearsonr(yval, predicttest_val)[0]
+    }
+
+    print(f"Validation Metrics: {val_metrics_dict}")
+
+    # Assuming `xresult` is available from somewhere in your data
+    # If `xresult` is not defined in your original script, replace with correct variable or data
+    # For now, I'll assume it's part of the rowdata:
+    xresult = rowdata['xaxis'].values  # Adjust if needed based on your actual data structure
+    
+    # Plot the results
+    plot_results(predicttest, ytest, xresult, title_suffix=" - Test Set")
+    plot_results(predicttest_val, yval, xresult, title_suffix=" - Validation Set")
+
+    # Calculate and plot histogram of errors
+    errors_test = ytest - predicttest
+    plot_histogram_of_errors(errors_test, title="Histogram of Errors - Test Set")
+    
+    errors_val = yval - predicttest_val
+    plot_histogram_of_errors(errors_val, title="Histogram of Errors - Validation Set")
+
+    # Optional: Save the model
+    import joblib
+    model_filename = 'best_ann_model.pkl'
+    joblib.dump(model, model_filename)
+    print(f"Model saved as {model_filename}")
+
+if __name__ == "__main__":
+    main()
